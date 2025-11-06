@@ -242,3 +242,4 @@ For issues with:
 - **This application**: Check the code and configuration
 - **RGB Matrix library**: Visit https://github.com/hzeller/rpi-rgb-led-matrix
 - **Hardware setup**: Consult your LED matrix panel and adapter documentation
+# LED-Matrix_interface
