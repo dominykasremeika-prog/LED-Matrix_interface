@@ -1,0 +1,19 @@
+# LED Matrix Drawing Application Requirements
+# Project: Lemona - LED Matrix Drawer
+# Python Version: 3.7+
+
+# Core Python packages
+numpy>=1.21.0
+Pillow>=9.0.0
+
+# RGB Matrix Library for Raspberry Pi
+# This library controls RGB LED matrices via GPIO pins
+# Source: https://github.com/hzeller/rpi-rgb-led-matrix
+# Installation: See SETUP.md for detailed instructions
+
+# Tkinter (GUI library)
+# Usually included with Python, but if missing:
+# - Ubuntu/Debian: sudo apt-get install python3-tk
+# - Fedora: sudo dnf install python3-tkinter
+# - macOS: Included with Python
+# - Windows: Included with Python
