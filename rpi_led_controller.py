@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Raspberry Pi LED Matrix Controller v2.1
+Raspberry Pi LED Matrix Controller v2.2
 Polls the web interface API and displays content on dual 64x64 LED matrices
 Supports:
 - Draw mode (real-time drawing, overrides uploads)
@@ -11,6 +11,8 @@ Matrix configuration: Two 64x64 panels daisy-chained via GPIO
 import time
 import requests
 import sys
+import hashlib
+import json
 from pathlib import Path
 from PIL import Image, ImageSequence
 from io import BytesIO
@@ -20,9 +22,8 @@ from rgbmatrix import RGBMatrix, RGBMatrixOptions
 API_URL = "http://45.80.148.216:8000/api/display"
 API_LATEST = "http://45.80.148.216:8000/api/latest"
 API_FILE = "http://45.80.148.216:8000/api/processed/"
-POLL_INTERVAL = 0.01  # Check draw API frequently
-POLL_LATEST_INTERVAL = 2.0  # Check for new uploads every 2 seconds
-DRAW_MODE_TIMEOUT = 5.0  # Return to upload mode after 5 sec of no draw updates
+POLL_DRAW_INTERVAL = 0.5  # Check draw API every 500ms (reduced from 200ms)
+POLL_LATEST_INTERVAL = 5.0  # Check for new uploads every 5 seconds (reduced from 3s)
 
 class DualMatrixController:
     def __init__(self):
@@ -50,9 +51,15 @@ class DualMatrixController:
         self.frame_duration = 100  # milliseconds
         self.last_frame_time = time.time()
         self.is_animated = False
+        self.last_draw_check = 0
+        self.last_displayed_data = None  # Cache to prevent redundant refreshes
+        self.last_displayed_draw_timestamp = None  # Track what we last displayed for draw mode
+        self.last_displayed_upload_timestamp = None  # Track what we last displayed for upload mode
+        self.last_draw_content_hash = None  # Hash of the last draw content displayed
+        self.last_upload_content_hash = None  # Hash of the last upload content displayed
         
         print("=" * 60)
-        print("Raspberry Pi LED Matrix Controller v2.1")
+        print("Raspberry Pi LED Matrix Controller v2.2")
         print("=" * 60)
         print(f"Matrix size: {options.rows}x{options.cols} per panel")
         print(f"Panels: {options.chain_length} (daisy-chained)")
@@ -115,6 +122,15 @@ class DualMatrixController:
     def clear_display(self):
         """Clear the entire display"""
         self.matrix.Clear()
+    
+    def compute_content_hash(self, data):
+        """Compute a hash of the content to detect actual changes"""
+        try:
+            # Convert data to string and hash it
+            data_str = json.dumps(data, sort_keys=True)
+            return hashlib.md5(data_str.encode()).hexdigest()
+        except:
+            return None
     
     def load_image_from_url(self, url):
         """Download and load an image from URL"""
@@ -192,57 +208,128 @@ class DualMatrixController:
     def run(self):
         """Main loop - monitor both draw API and upload API"""
         print("Starting main loop... Press Ctrl+C to exit")
-        print("✓ Monitoring draw mode (real-time)")
-        print("✓ Monitoring upload mode (images/GIFs)\n")
+        print("✓ Displays whichever is most recently updated: drawings or uploads")
+        print("✓ Only updates when new data is received (no flashing)\n")
         
         last_upload_check = time.time()
+        last_draw_timestamp_str = None
+        last_upload_timestamp_str = None
         
         try:
             while True:
                 current_time = time.time()
                 
-                # Check for new uploads periodically
+                # Check draw API (every 500ms)
+                if current_time - self.last_draw_check >= POLL_DRAW_INTERVAL:
+                    data = self.fetch_display_data()
+                    
+                    if data:
+                        draw_timestamp = data.get('last_updated')
+                        matrix_a = data.get('matrixA')
+                        matrix_b = data.get('matrixB')
+                        
+                        if matrix_a and matrix_b:
+                            # Compute hash of the actual pixel content
+                            content_hash = self.compute_content_hash({'a': matrix_a, 'b': matrix_b})
+                            
+                            # Only update if the actual content has changed
+                            if content_hash and content_hash != self.last_draw_content_hash:
+                                # Compare timestamps to decide if draw should override upload
+                                should_display_draw = False
+                                
+                                if last_upload_timestamp_str is None:
+                                    # No upload yet, display draw
+                                    should_display_draw = True
+                                elif draw_timestamp and draw_timestamp > last_upload_timestamp_str:
+                                    # Draw is newer than upload, display draw
+                                    should_display_draw = True
+                                elif draw_timestamp == last_draw_timestamp_str:
+                                    # Same timestamp but content changed (user continued drawing)
+                                    should_display_draw = True
+                                
+                                if should_display_draw:
+                                    # Switch to draw mode and clear upload content
+                                    if self.current_mode == "upload":
+                                        print("[SWITCHING] Upload → Draw mode")
+                                        self.gif_frames_a = []
+                                        self.gif_frames_b = []
+                                    
+                                    self.current_mode = "draw"
+                                    self.last_draw_time = current_time
+                                    print(f"[DRAW MODE] Updating display (new content detected)")
+                                    self.display_matrices(matrix_a, matrix_b)
+                                    last_draw_timestamp_str = draw_timestamp
+                                    self.last_displayed_draw_timestamp = draw_timestamp
+                                    self.last_draw_content_hash = content_hash
+                    
+                    self.last_draw_check = current_time
+                
+                # Check for new uploads (every 5 seconds)
                 if current_time - last_upload_check >= POLL_LATEST_INTERVAL:
                     upload_data = self.fetch_latest_upload()
                     
-                    if upload_data and upload_data.get('timestamp') != self.last_upload_timestamp:
-                        self.last_upload_timestamp = upload_data.get('timestamp')
-                        file_type = upload_data.get('type')
-                        files = upload_data.get('files', [])
+                    if upload_data:
+                        upload_timestamp = upload_data.get('timestamp')
                         
-                        if len(files) >= 2:
-                            print(f"\n[UPLOAD MODE] New {file_type} detected: {files}")
-                            self.current_mode = "upload"
+                        # Compute hash of upload metadata to detect actual new uploads
+                        upload_hash = self.compute_content_hash(upload_data)
+                        
+                        # Only update if the upload content has actually changed
+                        if upload_hash and upload_hash != self.last_upload_content_hash:
+                            # Compare timestamps to decide if upload should override draw
+                            should_display_upload = False
                             
-                            if file_type == 'gif':
-                                print("Loading GIF frames...")
-                                self.gif_frames_a, durations_a = self.load_gif_frames(API_FILE + files[0])
-                                self.gif_frames_b, durations_b = self.load_gif_frames(API_FILE + files[1])
+                            if last_draw_timestamp_str is None:
+                                # No draw yet, display upload
+                                should_display_upload = True
+                            elif upload_timestamp and upload_timestamp > last_draw_timestamp_str:
+                                # Upload is newer than draw, display upload
+                                should_display_upload = True
+                            
+                            if should_display_upload:
+                                file_type = upload_data.get('type')
+                                files = upload_data.get('files', [])
                                 
-                                if self.gif_frames_a and self.gif_frames_b:
-                                    self.frame_duration = durations_a[0] if durations_a else 100
-                                    self.current_frame = 0
-                                    print(f"✓ Loaded {len(self.gif_frames_a)} frames, {self.frame_duration}ms/frame")
-                                else:
-                                    print("✗ Failed to load GIF frames")
-                                    self.current_mode = "draw"
-                            else:
-                                # Static image
-                                print("Loading static images...")
-                                img_a = self.load_image_from_url(API_FILE + files[0])
-                                img_b = self.load_image_from_url(API_FILE + files[1])
-                                
-                                if img_a and img_b:
-                                    self.display_image(img_a, img_b)
-                                    print("✓ Static images displayed")
-                                else:
-                                    print("✗ Failed to load images")
+                                if len(files) >= 2:
+                                    # Switch to upload mode and clear draw content
+                                    if self.current_mode == "draw":
+                                        print("[SWITCHING] Draw → Upload mode")
+                                    
+                                    print(f"\n[UPLOAD MODE] New {file_type} detected (new content)")
+                                    self.current_mode = "upload"
+                                    self.is_animated = (file_type == 'gif')
+                                    last_upload_timestamp_str = upload_timestamp
+                                    self.last_displayed_upload_timestamp = upload_timestamp
+                                    self.last_upload_content_hash = upload_hash
+                                    
+                                    if file_type == 'gif':
+                                        print("Loading GIF frames...")
+                                        self.gif_frames_a, durations_a = self.load_gif_frames(API_FILE + files[0])
+                                        self.gif_frames_b, durations_b = self.load_gif_frames(API_FILE + files[1])
+                                        
+                                        if self.gif_frames_a and self.gif_frames_b:
+                                            self.frame_duration = durations_a[0] if durations_a else 100
+                                            self.current_frame = 0
+                                            print(f"✓ Loaded {len(self.gif_frames_a)} frames, {self.frame_duration}ms/frame")
+                                        else:
+                                            print("✗ Failed to load GIF frames")
+                                            self.current_mode = "idle"
+                                    else:
+                                        # Static image - display once
+                                        print("Loading static images...")
+                                        img_a = self.load_image_from_url(API_FILE + files[0])
+                                        img_b = self.load_image_from_url(API_FILE + files[1])
+                                        
+                                        if img_a and img_b:
+                                            self.display_image(img_a, img_b)
+                                            print("✓ Static images displayed")
+                                        else:
+                                            print("✗ Failed to load images")
                     
                     last_upload_check = current_time
                 
-                # Handle display based on mode
-                if self.current_mode == "upload" and self.gif_frames_a and self.gif_frames_b:
-                    # Animate GIF
+                # Animate GIF if in upload mode
+                if self.current_mode == "upload" and self.is_animated and self.gif_frames_a and self.gif_frames_b:
                     if current_time - self.last_frame_time >= (self.frame_duration / 1000.0):
                         self.display_image(
                             self.gif_frames_a[self.current_frame],
@@ -251,24 +338,11 @@ class DualMatrixController:
                         self.current_frame = (self.current_frame + 1) % len(self.gif_frames_a)
                         self.last_frame_time = current_time
                 
-                elif self.current_mode == "draw":
-                    # Check draw API for real-time drawing
-                    data = self.fetch_display_data()
-                    
-                    if data:
-                        timestamp = data.get('last_updated')
-                        
-                        if timestamp and timestamp != self.last_timestamp:
-                            matrix_a = data.get('matrixA')
-                            matrix_b = data.get('matrixB')
-                            
-                            if matrix_a and matrix_b:
-                                print(f"[DRAW MODE] Updating display...")
-                                self.display_matrices(matrix_a, matrix_b)
-                                self.last_timestamp = timestamp
-                
-                # Small delay
-                time.sleep(POLL_INTERVAL)
+                # Adaptive sleep based on mode
+                if self.is_animated and self.current_mode == "upload":
+                    time.sleep(0.02)  # Fast loop for animations (20ms)
+                else:
+                    time.sleep(0.1)  # Slower for static/draw mode (100ms)
                 
         except KeyboardInterrupt:
             print("\n\nShutting down...")
