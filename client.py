@@ -17,6 +17,38 @@ except ImportError:
 
 CONFIG_FILE = "config.json"
 
+def get_network_info():
+    info = {
+        "type": "Unknown",
+        "ssid": None,
+        "ip": None
+    }
+    
+    # Get IP
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        info["ip"] = s.getsockname()[0]
+        s.close()
+    except Exception:
+        info["ip"] = "127.0.0.1"
+
+    # Check for WiFi
+    try:
+        ssid = subprocess.check_output(["iwgetid", "-r"]).decode("utf-8").strip()
+        if ssid:
+            info["type"] = "WiFi"
+            info["ssid"] = ssid
+            return info
+    except Exception:
+        pass
+
+    # Check for Ethernet
+    if info["ip"] != "127.0.0.1":
+        info["type"] = "Ethernet"
+    
+    return info
+
 def load_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f:
@@ -71,39 +103,6 @@ def fetch_image(url):
         pass
     return None
 
-def get_network_info():
-    info = {
-        "type": "Unknown",
-        "ssid": None,
-        "ip": None
-    }
-    
-    # Get IP
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        info["ip"] = s.getsockname()[0]
-        s.close()
-    except Exception:
-        info["ip"] = "127.0.0.1"
-
-    # Check for WiFi
-    try:
-        ssid = subprocess.check_output(["iwgetid", "-r"]).decode("utf-8").strip()
-        if ssid:
-            info["type"] = "WiFi"
-            info["ssid"] = ssid
-            return info
-    except Exception:
-        pass
-
-    # Check for Ethernet
-    # Simple check: if not wifi and we have an IP, assume ethernet or other
-    if info["ip"] != "127.0.0.1":
-        info["type"] = "Ethernet"
-    
-    return info
-
 def main():
     # Change working directory to script directory to find config.json
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -123,9 +122,6 @@ def main():
     options.brightness = 50
     options.disable_hardware_pulsing = False
     options.pwm_lsb_nanoseconds = 140
-    
-    # Screen rotation (0, 90, 180, 270)
-    screen_rotation = 0
     
     # Drop privileges is often problematic if not running as root, but we usually run as root.
     options.drop_privileges = False
@@ -183,35 +179,65 @@ def main():
     url_a = f"http://{server_ip}:5000/api/matrix/a"
     url_b = f"http://{server_ip}:5000/api/matrix/b"
     telemetry_url = f"http://{server_ip}:5000/api/telemetry"
+    config_url = f"http://{server_ip}:5000/api/client-config"
 
     print(f"Starting loop. Fetching from {server_ip}...")
+
+    # Initial settings
+    current_polling_rate = 1.0
+    current_request_send_rate = 1.0
+    screen_rotation = 0
 
     while True:
         start_time = time.time()
         
-        # Telemetry Data
+        # 1. Fetch Configuration
+        try:
+            config_resp = requests.get(config_url, timeout=0.5)
+            if config_resp.status_code == 200:
+                remote_config = config_resp.json()
+                
+                # Apply settings
+                if "brightness" in remote_config:
+                    matrix.brightness = int(remote_config["brightness"])
+                
+                if "polling_rate" in remote_config:
+                    current_polling_rate = float(remote_config["polling_rate"])
+                
+                if "request_send_rate" in remote_config:
+                    current_request_send_rate = float(remote_config["request_send_rate"])
+                
+                if "position_1" in remote_config:
+                    screen_rotation = int(remote_config["position_1"])
+                
+                # Note: gpio_slowdown and hardware_pulsing require restart/re-init
+        except Exception:
+            pass
+
+        # 2. Telemetry Data
         telemetry = {
-            "polling_rate": 1.0,
+            "polling_rate": current_polling_rate,
             "gpio_slowdown": options.gpio_slowdown,
             "network": get_network_info(),
-            "refresh_rate": 60, # Approximate, hard to get exact from python binding without callback
+            "refresh_rate": 60, # Approximate
             "hardware_pulsing": not options.disable_hardware_pulsing,
-            "brightness": options.brightness,
-            "screen_orientation": screen_rotation,
-            "request_send_rate": 1.0
+            "brightness": matrix.brightness,
+            "position_1": screen_rotation,
+            "position_2": 0,
+            "request_send_rate": current_request_send_rate
         }
         
-        # Send Telemetry (Async or just do it)
+        # Send Telemetry
         try:
             requests.post(telemetry_url, json=telemetry, timeout=0.5)
         except Exception:
-            pass # Ignore telemetry errors to keep display running
+            pass 
 
+        # 3. Fetch Images
         img_a = fetch_image(url_a)
         img_b = fetch_image(url_b)
 
         if img_a is None and img_b is None:
-            # If both failed, wait a bit longer before retrying to avoid spamming
             time.sleep(1)
             continue
 
@@ -220,35 +246,27 @@ def main():
             full_img = Image.new("RGB", (width, height), (0, 0, 0))
             
             if img_a:
-                # Resize to fit one panel if needed, or just paste
                 img_a = img_a.resize((options.cols, options.rows))
                 full_img.paste(img_a, (0, 0))
             
             if img_b:
                 img_b = img_b.resize((options.cols, options.rows))
-                # Paste second image. Assuming horizontal chain.
-                # If chain=2, second panel starts at cols pixels.
                 full_img.paste(img_b, (options.cols, 0))
             
             # Apply rotation
             if screen_rotation != 0:
                 full_img = full_img.rotate(screen_rotation, expand=True)
-                # Note: Rotating might change dimensions, but SetImage expects matrix dimensions.
-                # If rotation is 90/270, we might need to handle aspect ratio or crop/resize.
-                # For now, assuming 180 or square, or user handles content.
-                # If 90/270 on non-square, it will be tricky.
-                # Let's resize back to matrix size if needed?
                 if full_img.size != (width, height):
                      full_img = full_img.resize((width, height))
 
             offscreen_canvas.SetImage(full_img, unsafe=False)
             offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
         
-        # Limit frame rate to avoid overloading CPU/Network
-        # Sleep for remaining time to hit 1 FPS (1 request per second)
+        # Limit frame rate based on request_send_rate
+        delay = 1.0 / current_request_send_rate if current_request_send_rate > 0 else 1.0
         elapsed = time.time() - start_time
-        if elapsed < 1.0:
-            time.sleep(1.0 - elapsed)
+        if elapsed < delay:
+            time.sleep(delay - elapsed)
 
 if __name__ == "__main__":
     main()
