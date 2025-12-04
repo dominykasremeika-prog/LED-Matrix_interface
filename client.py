@@ -3,6 +3,8 @@ import time
 import json
 import os
 import requests
+import subprocess
+import socket
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 
@@ -69,6 +71,39 @@ def fetch_image(url):
         pass
     return None
 
+def get_network_info():
+    info = {
+        "type": "Unknown",
+        "ssid": None,
+        "ip": None
+    }
+    
+    # Get IP
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        info["ip"] = s.getsockname()[0]
+        s.close()
+    except Exception:
+        info["ip"] = "127.0.0.1"
+
+    # Check for WiFi
+    try:
+        ssid = subprocess.check_output(["iwgetid", "-r"]).decode("utf-8").strip()
+        if ssid:
+            info["type"] = "WiFi"
+            info["ssid"] = ssid
+            return info
+    except Exception:
+        pass
+
+    # Check for Ethernet
+    # Simple check: if not wifi and we have an IP, assume ethernet or other
+    if info["ip"] != "127.0.0.1":
+        info["type"] = "Ethernet"
+    
+    return info
+
 def main():
     # Change working directory to script directory to find config.json
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -88,6 +123,9 @@ def main():
     options.brightness = 50
     options.disable_hardware_pulsing = False
     options.pwm_lsb_nanoseconds = 140
+    
+    # Screen rotation (0, 90, 180, 270)
+    screen_rotation = 0
     
     # Drop privileges is often problematic if not running as root, but we usually run as root.
     options.drop_privileges = False
@@ -144,12 +182,31 @@ def main():
     server_ip = config["server_ip"]
     url_a = f"http://{server_ip}:5000/api/matrix/a"
     url_b = f"http://{server_ip}:5000/api/matrix/b"
+    telemetry_url = f"http://{server_ip}:5000/api/telemetry"
 
     print(f"Starting loop. Fetching from {server_ip}...")
 
     while True:
         start_time = time.time()
         
+        # Telemetry Data
+        telemetry = {
+            "polling_rate": 1.0,
+            "gpio_slowdown": options.gpio_slowdown,
+            "network": get_network_info(),
+            "refresh_rate": 60, # Approximate, hard to get exact from python binding without callback
+            "hardware_pulsing": not options.disable_hardware_pulsing,
+            "brightness": options.brightness,
+            "screen_orientation": screen_rotation,
+            "request_send_rate": 1.0
+        }
+        
+        # Send Telemetry (Async or just do it)
+        try:
+            requests.post(telemetry_url, json=telemetry, timeout=0.5)
+        except Exception:
+            pass # Ignore telemetry errors to keep display running
+
         img_a = fetch_image(url_a)
         img_b = fetch_image(url_b)
 
@@ -173,14 +230,25 @@ def main():
                 # If chain=2, second panel starts at cols pixels.
                 full_img.paste(img_b, (options.cols, 0))
             
+            # Apply rotation
+            if screen_rotation != 0:
+                full_img = full_img.rotate(screen_rotation, expand=True)
+                # Note: Rotating might change dimensions, but SetImage expects matrix dimensions.
+                # If rotation is 90/270, we might need to handle aspect ratio or crop/resize.
+                # For now, assuming 180 or square, or user handles content.
+                # If 90/270 on non-square, it will be tricky.
+                # Let's resize back to matrix size if needed?
+                if full_img.size != (width, height):
+                     full_img = full_img.resize((width, height))
+
             offscreen_canvas.SetImage(full_img, unsafe=False)
             offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
         
         # Limit frame rate to avoid overloading CPU/Network
-        # Sleep for remaining time to hit ~10-20 FPS or just fixed sleep
+        # Sleep for remaining time to hit 1 FPS (1 request per second)
         elapsed = time.time() - start_time
-        if elapsed < 0.1:
-            time.sleep(0.1 - elapsed)
+        if elapsed < 1.0:
+            time.sleep(1.0 - elapsed)
 
 if __name__ == "__main__":
     main()
