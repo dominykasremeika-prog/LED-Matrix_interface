@@ -5,8 +5,10 @@ import os
 import requests
 import subprocess
 import socket
+import threading
 from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageSequence
+from flask import Flask, request, jsonify
 
 # Try to import rgbmatrix. If not available, print error.
 try:
@@ -16,6 +18,29 @@ except ImportError:
     sys.exit(1)
 
 CONFIG_FILE = "config.json"
+SD_CONTENT_DIR = "sd_content"
+
+# Ensure SD content directory exists
+if not os.path.exists(SD_CONTENT_DIR):
+    os.makedirs(SD_CONTENT_DIR)
+
+# Flask App for receiving files
+app = Flask(__name__)
+
+@app.route('/api/sd/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    if file:
+        filename = file.filename
+        file.save(os.path.join(SD_CONTENT_DIR, filename))
+        return jsonify({"message": "File uploaded successfully"}), 200
+
+def run_flask_server():
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
 
 def get_network_info():
     info = {
@@ -187,6 +212,19 @@ def main():
     current_polling_rate = 1.0
     current_request_send_rate = 1.0
     screen_rotation = 0
+    use_sd_card_fallback = False
+
+    # Fallback state
+    fallback_files = []
+    current_fallback_index = 0
+    fallback_start_time = 0
+    current_gif = None
+    current_gif_frame = 0
+    next_frame_time = 0
+
+    # Start Flask server in a separate thread
+    flask_thread = threading.Thread(target=run_flask_server, daemon=True)
+    flask_thread.start()
 
     while True:
         start_time = time.time()
@@ -209,6 +247,9 @@ def main():
                 
                 if "position_1" in remote_config:
                     screen_rotation = int(remote_config["position_1"])
+                
+                if "use_sd_card_fallback" in remote_config:
+                    use_sd_card_fallback = bool(remote_config["use_sd_card_fallback"])
                 
                 # Note: gpio_slowdown and hardware_pulsing require restart/re-init
         except Exception:
@@ -238,14 +279,80 @@ def main():
         img_b = fetch_image(url_b)
 
         if img_a is None and img_b is None:
+            if use_sd_card_fallback:
+                # Fallback Logic
+                try:
+                    # Refresh file list if empty or periodically? For now, just listdir.
+                    # To avoid constant disk I/O, maybe only check if list is empty or every X seconds.
+                    # For simplicity, let's check if we need to load a file.
+                    
+                    if not fallback_files:
+                        fallback_files = [f for f in os.listdir(SD_CONTENT_DIR) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))]
+                        fallback_files.sort()
+                    
+                    if fallback_files:
+                        now = time.time()
+                        
+                        # Check if we need to switch file (30s timer)
+                        if now - fallback_start_time > 30 or current_gif is None:
+                            fallback_start_time = now
+                            current_fallback_index = (current_fallback_index + 1) % len(fallback_files)
+                            filename = fallback_files[current_fallback_index]
+                            filepath = os.path.join(SD_CONTENT_DIR, filename)
+                            try:
+                                current_gif = Image.open(filepath)
+                                current_gif_frame = 0
+                                next_frame_time = 0
+                            except Exception as e:
+                                print(f"Error loading fallback file {filename}: {e}")
+                                current_gif = None
+                        
+                        if current_gif:
+                            # Handle GIF animation
+                            if getattr(current_gif, "is_animated", False):
+                                if now >= next_frame_time:
+                                    current_gif.seek(current_gif_frame)
+                                    duration = current_gif.info.get('duration', 100) / 1000.0
+                                    next_frame_time = now + duration
+                                    current_gif_frame = (current_gif_frame + 1) % current_gif.n_frames
+                            
+                            # Create full image from fallback content
+                            full_img = Image.new("RGB", (width, height), (0, 0, 0))
+                            
+                            # Resize/Crop logic: Fit to screen
+                            # For now, simple resize
+                            frame = current_gif.convert("RGB")
+                            frame = frame.resize((width, height))
+                            full_img.paste(frame, (0, 0))
+                            
+                            # Apply rotation
+                            if screen_rotation != 0:
+                                full_img = full_img.rotate(screen_rotation, expand=True)
+                                if full_img.size != (width, height):
+                                     full_img = full_img.resize((width, height))
+
+                            offscreen_canvas.SetImage(full_img, unsafe=False)
+                            offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
+                            
+                            # Short sleep for loop, but GIF timing handles frame rate
+                            time.sleep(0.01) 
+                            continue
+                except Exception as e:
+                    print(f"Fallback error: {e}")
+            
+            # If no fallback or failed, sleep
             time.sleep(1)
             continue
+        
+        # Reset fallback state if we have active content
+        current_gif = None
 
         if img_a or img_b:
             # Create a composite image
             full_img = Image.new("RGB", (width, height), (0, 0, 0))
             
             if img_a:
+                # Resize to fit one panel if needed, or just paste
                 img_a = img_a.resize((options.cols, options.rows))
                 full_img.paste(img_a, (0, 0))
             

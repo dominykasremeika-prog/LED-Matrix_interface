@@ -6,6 +6,7 @@
 numpy>=1.21.0
 Pillow>=9.0.0
 requests>=2.28.0
+flask>=2.0.0
 
 # RGB Matrix Library for Raspberry Pi
 # This library controls RGB LED matrices via GPIO pins
