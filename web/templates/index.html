@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LED Matrix Control</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #1e1e1e;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .navbar {
+            background-color: #252526;
+            border-bottom: 1px solid #333;
+            padding-top: 0.5rem;
+            padding-bottom: 0.5rem;
+        }
+        .navbar-brand {
+            font-weight: bold;
+            font-size: 1.5rem;
+            color: #fff !important;
+        }
+        .nav-tabs {
+            border-bottom: 1px solid #333;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+        }
+        .nav-link {
+            color: #cccccc !important;
+            border: none !important;
+            background: transparent !important;
+            padding: 10px 20px;
+            white-space: nowrap;
+        }
+        .nav-link:hover {
+            color: #fff !important;
+        }
+        .nav-link.active {
+            color: #4caf50 !important; /* Green active tab */
+            border-bottom: 2px solid #4caf50 !important;
+            font-weight: 500;
+        }
+        .card {
+            background-color: #252526;
+            border: 1px solid #333;
+            margin-bottom: 20px;
+        }
+        .card-header {
+            background-color: transparent;
+            border-bottom: none;
+            font-weight: 600;
+            font-size: 1.1rem;
+            padding: 15px 20px;
+        }
+        .card-body {
+            padding: 20px;
+        }
+        .form-control, .form-select {
+            background-color: #3c3c3c;
+            border: 1px solid #555;
+            color: #fff;
+        }
+        .form-control:focus, .form-select:focus {
+            background-color: #444;
+            color: #fff;
+            border-color: #4caf50;
+            box-shadow: none;
+        }
+        .btn-primary { background-color: #007acc; border: none; }
+        .btn-success { background-color: #4caf50; border: none; }
+        .btn-danger { background-color: #d32f2f; border: none; }
+        .btn-secondary { background-color: #424242; border: none; }
+        
+        /* Custom Range Slider */
+        input[type=range] {
+            accent-color: #e0e0e0;
+        }
+
+        /* Canvas */
+        #draw-canvas {
+            border: 1px solid #333;
+            background-color: #000;
+            image-rendering: pixelated;
+            max-width: 100%;
+            touch-action: none; /* Prevent scrolling on mobile */
+        }
+
+        /* Mode Selection Cards */
+        .mode-card {
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid #444;
+            background-color: #333;
+            overflow: hidden;
+        }
+        .mode-card:hover {
+            background-color: #3a3a3a;
+        }
+        .mode-card.active {
+            border-color: #4caf50;
+            background-color: #2e3b2e;
+        }
+        .mode-radio {
+            transform: scale(1.2);
+            margin-right: 10px;
+            accent-color: #4caf50;
+        }
+        .mode-radio {
+            display: none;
+        }
+        
+        /* Fullscreen Draw */
+        #draw-container.fullscreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 9999;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+        }
+        #draw-container.fullscreen canvas {
+            max-width: 100%;
+            max-height: 80vh;
+            width: auto;
+            height: auto;
+        }
+        #draw-container.fullscreen .controls {
+            display: none;
+        }
+        #draw-container.fullscreen .fs-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .fs-controls { display: none; }
+        #draw-container.fullscreen .fs-controls { display: flex; }
+
+        /* File Input Fix */
+        input[type="file"] {
+            max-width: 100%;
+        }
+
+        /* Tab Scroll Fixes */
+        #settings, #sdcard, #draw {
+            padding-bottom: 150px;
+        }
+
+        /* Selected File Highlight */
+        .list-group-item.active {
+            background-color: #4caf50 !important;
+            border-color: #4caf50 !important;
+            color: #fff !important;
+        }
+
+        /* Status Indicators */
+        .status-dot {
+            height: 10px;
+            width: 10px;
+            background-color: #757575;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        .status-dot.online { background-color: #4caf50; }
+
+        /* Toast Container */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1055;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand" href="#">LED Matrix Control</a>
+            
+            <div class="d-flex align-items-center ms-auto">
+                <button class="btn btn-link text-white me-3 p-0" onclick="document.querySelector('button[data-bs-target=\'#settings\']').click()" title="Settings">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-gear-fill" viewBox="0 0 16 16">
+                        <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.86z"/>
+                    </svg>
+                </button>
+                <span class="text-muted me-3 d-none d-md-inline"><span class="status-dot online"></span>Raspberry Pi</span>
+                <span class="text-muted me-3 d-none d-md-inline">{{ user.username }}</span>
+                <a href="/logout" class="btn btn-danger btn-sm">Logout</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4">
+        <ul class="nav nav-tabs mt-2" id="mainTab" role="tablist">
+            <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#draw">Draw</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#upload">Upload</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#sdcard">SD Card</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#admin">Admin</button></li>
+            <li class="nav-item d-none"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#settings">Settings</button></li>
+        </ul>
+
+        <div class="tab-content mt-4" id="mainTabContent">
+            
+            <!-- Draw Tab -->
+            <div class="tab-pane fade show active" id="draw">
+                <div class="card mb-3">
+                    <div class="card-body d-flex align-items-center flex-wrap gap-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <label>Color:</label>
+                            <input type="color" id="draw-color" class="form-control form-control-color" value="#ff0000" title="Choose your color">
+                        </div>
+                        
+                        <div class="d-flex align-items-center gap-2">
+                            <label>Size:</label>
+                            <input type="range" class="form-range" id="brush-size" min="1" max="10" value="1" style="width: 100px;">
+                            <span id="brush-size-val">1</span>
+                        </div>
+
+                        <div class="btn-group">
+                            <button class="btn btn-success active" id="tool-brush">Brush</button>
+                            <button class="btn btn-secondary" id="tool-eraser">Eraser</button>
+                            <button class="btn btn-secondary" id="tool-bucket">Bucket</button>
+                        </div>
+
+                        <div class="btn-group ms-auto">
+                            <button class="btn btn-secondary" id="btn-undo">Undo</button>
+                            <button class="btn btn-secondary" id="btn-redo">Redo</button>
+                            <button class="btn btn-danger" onclick="clearMatrix()">Clear</button>
+                            <button class="btn btn-primary" onclick="toggleFullscreen()">Fullscreen</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="draw-container" class="card p-0 bg-black d-flex justify-content-center align-items-center" style="min-height: 400px;">
+                    <canvas id="draw-canvas" width="640" height="320"></canvas>
+                    <div class="fs-controls">
+                        <input type="color" id="fs-color" class="form-control form-control-color" value="#ff0000" onchange="document.getElementById('draw-color').value = this.value">
+                        <button class="btn btn-secondary" onclick="setTool('brush')">Brush</button>
+                        <button class="btn btn-secondary" onclick="setTool('eraser')">Eraser</button>
+                        <button class="btn btn-danger" onclick="clearMatrix()">Clear</button>
+                        <button class="btn btn-primary" onclick="toggleFullscreen()">Exit FS</button>
+                    </div>
+                </div>
+                
+                <div class="mt-3">
+                    <button class="btn btn-success btn-lg" onclick="forceUpdate()">Update Matrix</button>
+                </div>
+            </div>
+
+            <!-- Upload Tab -->
+            <div class="tab-pane fade" id="upload">
+                <h4 class="mb-4">Upload Image/GIF/Video</h4>
+                
+                <div class="row g-3 mb-4">
+                    <div class="col-md-4">
+                        <div class="card p-3 mode-card" onclick="selectMode('upload', 'matrix_a')">
+                            <div class="d-flex align-items-center">
+                                <input type="radio" name="upload_mode" class="mode-radio" checked>
+                                <div>
+                                    <strong>Matrix A Only</strong>
+                                    <div class="text-muted small">Display on the left matrix only.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card p-3 mode-card" onclick="selectMode('upload', 'matrix_b')">
+                            <div class="d-flex align-items-center">
+                                <input type="radio" name="upload_mode" class="mode-radio">
+                                <div>
+                                    <strong>Matrix B Only</strong>
+                                    <div class="text-muted small">Display on the right matrix only.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card p-3 mode-card active" onclick="selectMode('upload', 'clone')">
+                            <div class="d-flex align-items-center">
+                                <input type="radio" name="upload_mode" class="mode-radio">
+                                <div>
+                                    <strong>Both (Clone)</strong>
+                                    <div class="text-muted small">Show the same image on both matrices.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card p-3 mode-card" onclick="selectMode('upload', 'split')">
+                            <div class="d-flex align-items-center">
+                                <input type="radio" name="upload_mode" class="mode-radio">
+                                <div>
+                                    <strong>Split (Span)</strong>
+                                    <div class="text-muted small">One image spans across both matrices (128x64).</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card p-3 mode-card" onclick="selectMode('upload', 'separate')">
+                            <div class="d-flex align-items-center">
+                                <input type="radio" name="upload_mode" class="mode-radio">
+                                <div>
+                                    <strong>Separate Files</strong>
+                                    <div class="text-muted small">Upload different files for each matrix.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-body d-flex flex-column gap-2">
+                        <label class="fw-bold">File (Main/A):</label>
+                        <input class="form-control form-control-sm w-100" type="file" id="live-upload-file" accept=".jpg,.jpeg,.png,.gif,.mp4">
+                        <span class="text-muted small" id="file-status">No file selected.</span>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <button class="btn btn-success btn-lg" onclick="uploadLive()">Upload to Matrix</button>
+                    <button class="btn btn-danger btn-lg" onclick="clearMatrix()">Clear Matrix</button>
+                </div>
+            </div>
+
+            <!-- SD Card Tab -->
+            <div class="tab-pane fade" id="sdcard">
+                <h4 class="mb-4">SD Card Management</h4>
+                <p class="text-muted mb-4">Upload files here to be stored on the Raspberry Pi's SD card. These files will be displayed when the "SD Card Fallback" mode is active.</p>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-md-4">
+                        <div class="card p-3 mode-card" onclick="selectMode('sd', 'matrix_a')">
+                            <div class="d-flex align-items-center">
+                                <input type="radio" name="sd_mode" class="mode-radio">
+                                <div><strong>Matrix A Only</strong></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card p-3 mode-card" onclick="selectMode('sd', 'matrix_b')">
+                            <div class="d-flex align-items-center">
+                                <input type="radio" name="sd_mode" class="mode-radio">
+                                <div><strong>Matrix B Only</strong></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card p-3 mode-card active" onclick="selectMode('sd', 'clone')">
+                            <div class="d-flex align-items-center">
+                                <input type="radio" name="sd_mode" class="mode-radio" checked>
+                                <div><strong>Both (Clone)</strong></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card p-3 mode-card" onclick="selectMode('sd', 'split')">
+                            <div class="d-flex align-items-center">
+                                <input type="radio" name="sd_mode" class="mode-radio">
+                                <div><strong>Split (Span)</strong></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-body d-flex flex-column gap-2">
+                        <label class="fw-bold">Select File:</label>
+                        <input class="form-control form-control-sm w-100" type="file" id="sd-upload-file">
+                        <span class="text-muted small">No file selected.</span>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 mb-4 flex-wrap">
+                    <button class="btn btn-success btn-lg" onclick="uploadSD()">Upload to SD Card</button>
+                    <button class="btn btn-primary btn-lg" onclick="playSD()">Play Selected</button>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="input-group" style="width: auto;">
+                            <span class="input-group-text bg-dark text-white border-secondary">Timer (s)</span>
+                            <input type="number" class="form-control" id="slideshow-duration" value="10" min="1" style="width: 70px;" placeholder="10">
+                        </div>
+                        <button class="btn btn-info btn-lg" onclick="startSlideshow()">Start Slideshow</button>
+                    </div>
+                    <button class="btn btn-danger btn-lg" onclick="stopSD()">Stop Playback</button>
+                </div>
+
+                <h5>Stored Files</h5>
+                <div class="list-group" id="sd-file-list">
+                    <!-- Files populated by JS -->
+                </div>
+            </div>
+
+            <!-- Admin Tab -->
+            <div class="tab-pane fade" id="admin">
+                <h4 class="mb-4">User Management</h4>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-dark table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Username</th>
+                                        <th>Status</th>
+                                        <th>Role</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="user-list">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <button class="btn btn-primary mt-3" onclick="loadUsers()">Refresh List</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div class="tab-pane fade" id="settings">
+                <div class="row">
+                    <!-- Live Status -->
+                    <div class="col-md-4">
+                        <h5 class="mb-3">Live Status</h5>
+                        <div class="card mb-2">
+                            <div class="card-body">
+                                <div class="text-muted small">Status:</div>
+                                <div class="fw-bold">Unknown</div>
+                            </div>
+                        </div>
+                        <div class="card mb-2">
+                            <div class="card-body">
+                                <div class="text-muted small">IP Address:</div>
+                                <div class="fw-bold">192.168.1.176</div>
+                            </div>
+                        </div>
+                        <div class="card mb-2">
+                            <div class="card-body">
+                                <div class="text-muted small">Network:</div>
+                                <div class="fw-bold">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Client Configuration -->
+                    <div class="col-md-8">
+                        <h5 class="mb-3">Client Configuration</h5>
+                        <form id="settings-form">
+                            <div class="mb-4">
+                                <label class="form-label">Brightness (0-100)</label>
+                                <div class="d-flex align-items-center gap-3">
+                                    <input type="range" class="form-range flex-grow-1" name="brightness" min="0" max="100" value="50" oninput="this.nextElementSibling.value = this.value">
+                                    <input type="number" class="form-control w-auto" value="50" style="width: 70px;" readonly>
+                                </div>
+                            </div>
+
+                            <div class="alert alert-warning mt-3">
+                                <i class="bi bi-exclamation-triangle"></i> 
+                                <strong>Warning:</strong> Changing hardware settings while the matrix is active may cause the service to restart or crash if invalid values are used.
+                            </div>
+
+                            <h6 class="text-muted mb-3">Hardware Configuration</h6>
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Rows</label>
+                                    <input type="number" class="form-control" name="rows" value="64">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Cols</label>
+                                    <input type="number" class="form-control" name="cols" value="64">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Chain Length</label>
+                                    <input type="number" class="form-control" name="chain_length" value="2">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Parallel</label>
+                                    <input type="number" class="form-control" name="parallel" value="1">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Scan Mode</label>
+                                    <select class="form-select" name="scan_mode">
+                                        <option value="0">Progressive (0)</option>
+                                        <option value="1">Interlaced (1)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Multiplexing</label>
+                                    <input type="number" class="form-control" name="multiplexing" value="0">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Row Address Type</label>
+                                    <input type="number" class="form-control" name="row_address_type" value="0">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">PWM Bits</label>
+                                    <input type="number" class="form-control" name="pwm_bits" value="11">
+                                </div>
+                            </div>
+
+                            <h6 class="text-muted mb-3">Performance & Quality</h6>
+                            <div class="mb-3">
+                                <label class="form-label">GPIO Slowdown (0-4)</label>
+                                <select class="form-select" name="gpio_slowdown">
+                                    <option value="0">0</option>
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4" selected>4</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">PWM LSB (ns)</label>
+                                <input type="number" class="form-control" name="pwm_lsb" value="130" min="60" max="220">
+                                <div class="form-text">Range: 60-220ns. Lower values might cause flickering or crashes.</div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Limit Refresh Rate (Hz)</label>
+                                <input type="number" class="form-control" name="limit_refresh_rate_hz" value="0">
+                                <div class="form-text">0 for no limit.</div>
+                            </div>
+                            <div class="form-check mb-4">
+                                <input class="form-check-input" type="checkbox" id="hw-pulsing" name="hardware_pulsing">
+                                <label class="form-check-label" for="hw-pulsing">Hardware Pulsing (Sound)</label>
+                            </div>
+
+                            <h6 class="text-muted mb-3">Panel Orientation</h6>
+                            <div class="d-flex gap-3 mb-4 flex-wrap">
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-outline-light" onclick="rotatePanel(0)">
+                                        Rotate Panel 1
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary" onclick="mirrorPanel(0)">
+                                        Mirror Panel 1
+                                    </button>
+                                </div>
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-outline-light" onclick="rotatePanel(1)">
+                                        Rotate Panel 2
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary" onclick="mirrorPanel(1)">
+                                        Mirror Panel 2
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-success" onclick="saveSettings()">Save Settings</button>
+                                <button type="button" class="btn btn-danger ms-auto" onclick="restartServer()">Restart Server</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // --- Toast Notification Logic ---
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            
+            // Limit to 3 toasts
+            if (container.childElementCount >= 3) {
+                container.removeChild(container.firstChild);
+            }
+
+            const id = 'toast-' + Date.now();
+            
+            let bgClass = 'text-bg-primary';
+            if (type === 'success') bgClass = 'text-bg-success';
+            if (type === 'danger' || type === 'error') bgClass = 'text-bg-danger';
+            if (type === 'warning') bgClass = 'text-bg-warning';
+
+            const html = `
+                <div id="${id}" class="toast align-items-center ${bgClass} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            ${message}
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                </div>
+            `;
+            
+            container.insertAdjacentHTML('beforeend', html);
+            const toastEl = document.getElementById(id);
+            const toast = new bootstrap.Toast(toastEl, { delay: 3000 });
+            toast.show();
+            
+            toastEl.addEventListener('hidden.bs.toast', () => {
+                toastEl.remove();
+            });
+        }
+
+        // Handle Flask Flash Messages
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    // Map flask categories to toast types if needed
+                    // Flask default is 'message', we might use 'error', 'success'
+                    showToast("{{ message }}", "{{ category if category != 'message' else 'info' }}");
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        // --- Drawing Logic ---
+        const canvas = document.getElementById('draw-canvas');
+        const ctx = canvas.getContext('2d');
+        const scale = 5; // 128x64 -> 640x320
+        let isDrawing = false;
+        let currentTool = 'brush';
+        let brushSize = 1;
+
+        // Init canvas black
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+        
+        // Touch events for mobile
+        canvas.addEventListener('touchstart', startDrawing, {passive: false});
+        canvas.addEventListener('touchmove', draw, {passive: false});
+        canvas.addEventListener('touchend', stopDrawing);
+        canvas.addEventListener('touchcancel', stopDrawing);
+
+        document.getElementById('brush-size').addEventListener('input', (e) => {
+            brushSize = parseInt(e.target.value);
+            document.getElementById('brush-size-val').innerText = brushSize;
+        });
+
+        document.getElementById('tool-brush').addEventListener('click', () => setTool('brush'));
+        document.getElementById('tool-eraser').addEventListener('click', () => setTool('eraser'));
+        document.getElementById('tool-bucket').addEventListener('click', () => setTool('bucket'));
+
+        function setTool(tool) {
+            currentTool = tool;
+            document.querySelectorAll('#draw .btn-group button').forEach(b => b.classList.remove('active', 'btn-success'));
+            document.querySelectorAll('#draw .btn-group button').forEach(b => b.classList.add('btn-secondary'));
+            
+            const btn = document.getElementById('tool-' + tool);
+            if(btn) {
+                btn.classList.remove('btn-secondary');
+                btn.classList.add('active', 'btn-success');
+            }
+        }
+
+        function startDrawing(e) {
+            e.preventDefault(); // Prevent scrolling
+            isDrawing = true;
+            draw(e);
+        }
+
+        function stopDrawing(e) {
+            if(e) e.preventDefault();
+            isDrawing = false;
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            if(e.cancelable) e.preventDefault(); // Prevent scrolling
+
+            const rect = canvas.getBoundingClientRect();
+            let clientX, clientY;
+            
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            // Calculate scale based on displayed size vs actual size
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+
+            const x = Math.floor((clientX - rect.left) * scaleX / scale);
+            const y = Math.floor((clientY - rect.top) * scaleY / scale);
+            const color = currentTool === 'eraser' ? '#000000' : document.getElementById('draw-color').value;
+
+            if (currentTool === 'bucket') {
+                // Simple fill (client side only for now visual)
+                ctx.fillStyle = color;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                // Send clear/fill command
+                // For now just draw a big rect
+            } else {
+                ctx.fillStyle = color;
+                ctx.fillRect(x * scale, y * scale, scale * brushSize, scale * brushSize);
+                
+                // Send to server (debounced or direct)
+                fetch('/draw', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({x, y, color, size: brushSize})
+                });
+            }
+        }
+
+        function clearMatrix() {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            fetch('/clear');
+        }
+
+        function forceUpdate() {
+            // In a real app, this might re-send the whole buffer
+            showToast('Matrix Updated!', 'success');
+        }
+
+        // --- Mode Selection Logic ---
+        let selectedSDFile = null;
+        let currentUploadMode = 'clone';
+        let currentSDMode = 'clone';
+
+        function selectMode(tab, mode) {
+            // Update UI
+            const container = tab === 'upload' ? document.querySelector('#upload .row') : document.querySelector('#sdcard .row');
+            container.querySelectorAll('.mode-card').forEach(c => c.classList.remove('active'));
+            
+            // Find the card that was clicked (or contains the radio)
+            event.currentTarget.classList.add('active');
+            event.currentTarget.querySelector('input[type="radio"]').checked = true;
+
+            if (tab === 'upload') {
+                currentUploadMode = mode;
+            } else {
+                currentSDMode = mode;
+            }
+        }
+
+        // --- Upload Logic ---
+        function uploadLive() {
+            const fileInput = document.getElementById('live-upload-file');
+            const file = fileInput.files[0];
+            if (!file) return showToast('Please select a file', 'warning');
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('mode', currentUploadMode);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) showToast('Uploaded and displaying!', 'success');
+                else showToast('Error: ' + data.error, 'danger');
+            });
+        }
+
+        function uploadSD() {
+            const fileInput = document.getElementById('sd-upload-file');
+            const file = fileInput.files[0];
+            if (!file) return showToast('Please select a file', 'warning');
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('mode', currentSDMode);
+
+            fetch('/sd-upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Uploaded to SD Card!', 'success');
+                    loadSDFiles();
+                } else {
+                    showToast('Error: ' + data.error, 'danger');
+                }
+            });
+        }
+
+        function loadSDFiles() {
+            fetch('/sd-files')
+            .then(res => res.json())
+            .then(data => {
+                const list = document.getElementById('sd-file-list');
+                list.innerHTML = '';
+                // Handle array response directly
+                const files = Array.isArray(data) ? data : (data.files || []);
+                
+                files.forEach(f => {
+                    const item = document.createElement('div');
+                    item.className = 'list-group-item list-group-item-action bg-dark text-white border-secondary d-flex justify-content-between align-items-center';
+                    
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = f;
+                    nameSpan.style.cursor = 'pointer';
+                    nameSpan.className = 'flex-grow-1';
+                    nameSpan.onclick = () => selectSDFile(f, item);
+                    
+                    const delBtn = document.createElement('button');
+                    delBtn.className = 'btn btn-sm btn-danger';
+                    delBtn.textContent = 'Delete';
+                    delBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        deleteSDFile(f);
+                    };
+                    
+                    item.appendChild(nameSpan);
+                    item.appendChild(delBtn);
+                    list.appendChild(item);
+                });
+            });
+        }
+
+        function selectSDFile(filename, element) {
+            selectedSDFile = filename;
+            // Reset all
+            document.querySelectorAll('#sd-file-list .list-group-item').forEach(el => {
+                el.classList.remove('active');
+            });
+            // Set active
+            element.classList.add('active');
+        }
+
+        function deleteSDFile(filename) {
+            if(!confirm('Delete ' + filename + '?')) return;
+            
+            fetch('/delete-sd-file', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({filename: filename})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) {
+                    showToast('Deleted ' + filename, 'success');
+                    loadSDFiles();
+                } else {
+                    showToast('Error: ' + data.error, 'danger');
+                }
+            });
+        }
+
+        function startSlideshow() {
+            const duration = document.getElementById('slideshow-duration').value;
+            fetch('/play-slideshow', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({duration: duration})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) showToast('Slideshow started!', 'success');
+                else showToast('Error: ' + data.error, 'danger');
+            });
+        }
+
+        function toggleFullscreen() {
+            const container = document.getElementById('draw-container');
+            container.classList.toggle('fullscreen');
+        }
+
+        function playSD() {
+            if (!selectedSDFile) {
+                showToast('Please select a file from the list first', 'warning');
+                return;
+            }
+            
+            fetch('/play-sd', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({filename: selectedSDFile})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) showToast('Playing ' + selectedSDFile, 'success');
+                else showToast('Error: ' + data.error, 'danger');
+            });
+        }
+
+        function stopSD() {
+            fetch('/clear');
+            showToast('Playback Stopped', 'info');
+        }
+
+        function saveSettings() {
+            const form = document.getElementById('settings-form');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            
+            fetch('/settings', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            })
+            .then(res => res.json())
+            .then(d => {
+                if(d.success) showToast('Settings Saved!', 'success');
+                else showToast('Error saving settings', 'danger');
+            });
+        }
+
+        function loadSettings() {
+            fetch('/settings')
+            .then(res => res.json())
+            .then(data => {
+                const form = document.getElementById('settings-form');
+                for (const [key, value] of Object.entries(data)) {
+                    const input = form.elements[key];
+                    if (input) {
+                        if (input.type === 'checkbox') {
+                            input.checked = value;
+                        } else {
+                            input.value = value;
+                            // Update range output if exists
+                            if (input.type === 'range' && input.nextElementSibling) {
+                                input.nextElementSibling.value = value;
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // --- Admin Logic ---
+        function loadUsers() {
+            fetch('/admin/users')
+            .then(res => {
+                if(res.status === 403) return [];
+                return res.json();
+            })
+            .then(users => {
+                const list = document.getElementById('user-list');
+                if(!list) return;
+                list.innerHTML = '';
+                if(users.error) return; // Handle error
+                
+                users.forEach(u => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${u.id}</td>
+                        <td>${u.username}</td>
+                        <td>
+                            ${u.is_approved ? '<span class="badge bg-success">Approved</span>' : '<span class="badge bg-warning text-dark">Pending</span>'}
+                        </td>
+                        <td>
+                            ${u.is_admin ? '<span class="badge bg-primary">Admin</span>' : '<span class="badge bg-secondary">User</span>'}
+                        </td>
+                        <td>
+                            ${!u.is_approved ? `<button class="btn btn-sm btn-success me-2" onclick="approveUser(${u.id})">Approve</button>` : ''}
+                            <button class="btn btn-sm btn-info me-2" onclick="toggleAdmin(${u.id})">Toggle Admin</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})">Delete</button>
+                        </td>
+                    `;
+                    list.appendChild(tr);
+                });
+            });
+        }
+
+        function approveUser(id) {
+            fetch('/admin/approve/' + id, {method: 'POST'})
+            .then(res => res.json())
+            .then(d => {
+                if(d.success) loadUsers();
+                else showToast(d.error, 'danger');
+            });
+        }
+
+        function toggleAdmin(id) {
+            fetch('/admin/toggle_admin/' + id, {method: 'POST'})
+            .then(res => res.json())
+            .then(d => {
+                if(d.success) loadUsers();
+                else showToast(d.error, 'danger');
+            });
+        }
+
+        function deleteUser(id) {
+            if(!confirm('Are you sure?')) return;
+            fetch('/admin/delete/' + id, {method: 'POST'})
+            .then(res => res.json())
+            .then(d => {
+                if(d.success) loadUsers();
+                else showToast(d.error, 'danger');
+            });
+        }
+
+        // Load users if on admin tab
+        document.querySelector('button[data-bs-target="#admin"]').addEventListener('shown.bs.tab', loadUsers);
+
+        // Initial Load
+        loadSDFiles();
+        loadSettings();
+
+        function rotatePanel(index) {
+            fetch('/rotate-panel', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({panel: index})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) showToast('Panel ' + (index+1) + ' rotated to ' + data.rotation + '°', 'success');
+                else showToast('Error: ' + data.error, 'danger');
+            });
+        }
+
+        function mirrorPanel(index) {
+            fetch('/mirror-panel', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({panel: index})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) showToast('Panel ' + (index+1) + ' mirror: ' + (data.mirror ? 'ON' : 'OFF'), 'success');
+                else showToast('Error: ' + data.error, 'danger');
+            });
+        }
+
+        function restartServer() {
+            if(!confirm('Are you sure you want to restart the server? The website will be unavailable for a few seconds.')) return;
+            
+            fetch('/restart', {method: 'POST'})
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) {
+                    showToast('Server restarting...', 'warning');
+                    setTimeout(() => location.reload(), 5000);
+                }
+                else showToast('Error: ' + data.error, 'danger');
+            });
+        }
+    </script>
+</body>
+</html>

@@ -18,7 +18,7 @@ cd "$(dirname "$0")"
 # Check if hardware mode is needed
 if [ "$1" == "--no-hardware" ] || [ "$1" == "-s" ]; then
     echo "🖥️  Running in simulation mode (no sudo needed)..."
-    python3 led_matrix_drawer.py
+    python3 led_matrix_drawer.py --no-hardware
 else
     echo "🔌 Running with hardware support (sudo required)..."
     echo "💡 Tip: Use './run.sh --no-hardware' for simulation mode"

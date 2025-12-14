@@ -52,7 +52,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo ""
         echo "Starting application in simulation mode..."
         echo ""
-        python3 led_matrix_drawer.py
+        python3 led_matrix_drawer.py --no-hardware
     fi
 else
     echo ""

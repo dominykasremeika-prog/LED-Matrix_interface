@@ -17,3 +17,7 @@ Pillow>=9.0.0
 # - Fedora: sudo dnf install python3-tkinter
 # - macOS: Included with Python
 # - Windows: Included with Python
+
+# Web Interface
+Flask>=2.0.0
+opencv-python-headless>=4.5.0
