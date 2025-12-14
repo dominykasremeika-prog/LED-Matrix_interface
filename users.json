@@ -1,0 +1,26 @@
+{
+    "1": {
+        "username": "dominykas191",
+        "password_hash": "scrypt:32768:8:1$0Lnp76Iy4gBweX5A$39852854dc13d5bb00daf3912e2731089d9c8baef6f6ad6942effb694e981e4c14fb16df4b9619ae002f63917a44f3fb65ee0b46d8c10470abd20cbd43bb6ad8",
+        "is_admin": true,
+        "is_approved": true
+    },
+    "2": {
+        "username": "ignuxas64@gmail.com",
+        "password_hash": "scrypt:32768:8:1$829UtnOOBTHSmxfm$588456f1cd85229bbd8795b822bb3113b8e588c24606101e69a7ed2d2b0e5cafbae3c13bbcc75da19e24defca9411d2df2c181086ade5fb8f65af645715a9b73",
+        "is_admin": true,
+        "is_approved": true
+    },
+    "3": {
+        "username": "dominykas19",
+        "password_hash": "scrypt:32768:8:1$j6731XjsZFRlQ1s1$09779264ee88c513884203fee8157b411a6b17f56208ca85f61401a0afb685aee819370a7b04edb36395e2bda29571b0f0350b195b98f9b8f2ba7b9218acef07",
+        "is_admin": true,
+        "is_approved": true
+    },
+    "4": {
+        "username": "admin",
+        "password_hash": "scrypt:32768:8:1$RDhX78vIsPyYziLn$076503ecc248ba5b0c198625fe5e93f69205295ba9b93126d337ba8532f7517772e549910a346de8a29925ea86930c6c80277d06a083ea87addd8511a8413ebd",
+        "is_admin": true,
+        "is_approved": true
+    }
+}
